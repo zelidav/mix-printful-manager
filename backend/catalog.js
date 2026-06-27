@@ -34,28 +34,35 @@ async function mapLimit(items, limit, fn) {
     while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
   }));
 }
-async function getRetry(token, p, tries = 4) {
+// Global rate gate — Printful v1 caps ~120 req/min; space requests to stay under it.
+let lastReq = 0;
+async function gate(ms) {
+  const now = Date.now();
+  const wait = Math.max(0, lastReq + ms - now);
+  lastReq = now + wait;
+  if (wait) await new Promise(r => setTimeout(r, wait));
+}
+async function getRetry(token, p, tries = 6) {
   for (let i = 0; i < tries; i++) {
+    await gate(650);
     try { return await request('GET', p, token, null); }
     catch (e) {
       const msg = String(e.message || e);
-      if (/429|rate limit/i.test(msg)) {
-        const m = msg.match(/(\d+)\s*seconds?/);
-        await new Promise(r => setTimeout(r, ((m ? +m[1] : 30) + 3) * 1000));
-        continue;
-      }
-      throw e;
+      const m = msg.match(/(\d+)\s*seconds?/);
+      const wait = /429|rate limit|too many/i.test(msg) ? ((m ? +m[1] : 20) + 2) * 1000 : 800 * (i + 1);
+      await new Promise(r => setTimeout(r, wait));
     }
   }
-  return request('GET', p, token, null);
+  throw new Error('giveup ' + p);
 }
 
 const PRICES_FILE = path.join(os.tmpdir(), 'mix_catalog_prices.json');
+const SEED_FILE = path.join(__dirname, 'catalog-prices.seed.json'); // committed full-price snapshot
 let pricesCache = null;
 async function computePrices(token) {
   const list = (await getList(token)).filter(p => !embroideryOnly(p));
   const prices = {};
-  await mapLimit(list, 6, async (p) => {
+  await mapLimit(list, 2, async (p) => {
     try {
       const vmap = await memo(`price:${p.id}`, 6 * 3600e3, async () => {
         const r = await getRetry(token, `/products/${p.id}`);
@@ -94,9 +101,10 @@ function register(app, resolveAccount) {
     try {
       const token = resolveAccount(req).token;
       if (req.query.refresh) pricesCache = null;
-      if (!pricesCache) { try { pricesCache = JSON.parse(fs.readFileSync(PRICES_FILE, 'utf8')); } catch {} }
+      if (!pricesCache) { try { pricesCache = JSON.parse(fs.readFileSync(PRICES_FILE, 'utf8')); } catch {} }       // warm /tmp cache
+      if (!pricesCache) { try { pricesCache = JSON.parse(fs.readFileSync(SEED_FILE, 'utf8')); } catch {} }          // committed seed (instant)
       if (!pricesCache) {
-        pricesCache = await computePrices(token);
+        pricesCache = await computePrices(token);                                                                   // last resort: live compute
         try { fs.writeFileSync(PRICES_FILE, JSON.stringify(pricesCache)); } catch {}
       }
       res.json({ count: Object.keys(pricesCache).length, prices: pricesCache });
@@ -104,4 +112,4 @@ function register(app, resolveAccount) {
   });
 }
 
-module.exports = { register };
+module.exports = { register, computePrices };
