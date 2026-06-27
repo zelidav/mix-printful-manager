@@ -52,6 +52,44 @@ async function pollFile(token, fileId, maxSec = 60) {
   return null;
 }
 
+// PNG intrinsic size from the IHDR header (no image lib needed)
+function pngSize(buf) {
+  if (!buf || buf.length < 24) return { w: 0, h: 0 };
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+// First print placement + print-area size for a catalog product (for centered mockup placement)
+async function placementArea(token, catalogId) {
+  try {
+    const r = await request('GET', `/mockup-generator/printfiles/${catalogId}`, token, null);
+    const res = r.result || {};
+    const placement = res.available_placements ? Object.keys(res.available_placements)[0] : 'default';
+    const pf = (res.printfiles || [])[0] || {};
+    return { placement: placement || 'default', area_w: pf.width || 1800, area_h: pf.height || 2400 };
+  } catch { return { placement: 'default', area_w: 1800, area_h: 2400 }; }
+}
+// Generate a real product mockup (design centered + fit), return its URL. Best-effort.
+async function generateMockup(token, catalogId, variantId, placement, imageUrl, dW, dH, area_w, area_h) {
+  const scale = Math.min(area_w / (dW || area_w), area_h / (dH || area_h)) * 0.92;
+  const w = Math.max(1, Math.round((dW || area_w) * scale));
+  const h = Math.max(1, Math.round((dH || area_h) * scale));
+  const left = Math.round((area_w - w) / 2), top = Math.round((area_h - h) / 2);
+  const task = await request('POST', `/mockup-generator/create-task/${catalogId}`, token, null, {
+    variant_ids: [variantId], format: 'jpg',
+    files: [{ placement, image_url: imageUrl, position: { area_width: area_w, area_height: area_h, width: w, height: h, top, left } }],
+  });
+  const key = task.result && task.result.task_key;
+  if (!key) return null;
+  const start = Date.now();
+  while (Date.now() - start < 70000) {
+    await new Promise(r => setTimeout(r, 3000));
+    const t = await request('GET', `/mockup-generator/task?task_key=${key}`, token, null);
+    const st = t.result && t.result.status;
+    if (st === 'completed') { const m = (t.result.mockups || [])[0]; return m && m.mockup_url; }
+    if (st === 'failed') return null;
+  }
+  return null;
+}
+
 function registerPublic(_app) { /* design files now hosted on GCS; no public route needed */ }
 
 // Authed create endpoint
@@ -80,6 +118,7 @@ function register(app, resolveAccount) {
       const fileId = ing.result && ing.result.id;
       if (!fileId) return res.status(500).json({ error: 'Printful file ingest failed', detail: ing, publicUrl });
       await pollFile(token, fileId);
+      const { w: dW, h: dH } = pngSize(buf);
 
       // 3) create one sync product per chosen catalog product
       const results = [];
@@ -105,8 +144,15 @@ function register(app, resolveAccount) {
             sync_variants,
           });
           const syncId = cr.result && cr.result.id;
-          descAdds[syncId] = { pid, name, retail, description, design_url: publicUrl };
-          results.push({ pid, ok: true, sync_id: syncId, name, retail, variants: sync_variants.length, description });
+          // Best-effort: real product mockup (design centered) -> set as thumbnail
+          let mockup = null;
+          try {
+            const { placement: pl, area_w, area_h } = await placementArea(token, pid);
+            mockup = await generateMockup(token, pid, variants[0].id, pl, publicUrl, dW, dH, area_w, area_h);
+            if (mockup) await request('PUT', `/sync/products/${syncId}`, token, storeId, { sync_product: { thumbnail: mockup } });
+          } catch (e) { /* keep product even if mockup fails */ }
+          descAdds[syncId] = { pid, name, retail, description, design_url: publicUrl, mockup };
+          results.push({ pid, ok: true, sync_id: syncId, name, retail, variants: sync_variants.length, description, mockup });
         } catch (e) {
           results.push({ pid, ok: false, error: String(e.message || e) });
         }
@@ -136,6 +182,27 @@ function register(app, resolveAccount) {
       res.json(await loadDescriptions(storeId));
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
+
+  // Shared catalog selection (server-side, per store) — the curated set everyone sees
+  app.get('/api/selection', async (req, res) => {
+    try {
+      const storeId = await nativeStoreId(resolveAccount(req).token);
+      res.json({ ids: await loadSelection(storeId) });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+  app.post('/api/selection', async (req, res) => {
+    try {
+      const storeId = await nativeStoreId(resolveAccount(req).token);
+      const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+      await bucket.file(`mix/selection-${storeId}.json`).save(JSON.stringify(ids), { contentType: 'application/json' });
+      res.json({ ok: true, ids });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+}
+
+async function loadSelection(storeId) {
+  try { const [buf] = await bucket.file(`mix/selection-${storeId}.json`).download(); return JSON.parse(buf.toString()); }
+  catch { return []; }
 }
 
 // Descriptions/prices persisted to GCS (our internal catalog; Printful native stores no description).

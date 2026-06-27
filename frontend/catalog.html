@@ -82,7 +82,7 @@
     const H = { 'X-Auth-Token': AUTH_TOKEN, 'X-PF-Account': acct };
 
     let items = [], cats = {}, prices = {};
-    let sel = new Set(JSON.parse(localStorage.getItem('mix_selection') || '[]'));
+    let sel = new Set();          // shared selection, loaded from the server
     let sortK = 'title', sortDir = 1;
 
     function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
@@ -94,6 +94,7 @@
       ]);
       (Array.isArray(catRes) ? catRes : []).forEach(c => cats[c.id] = c.title || c.name || ('cat ' + c.id));
       items = catalogRes.items || [];
+      try { const s = await fetch(BACKEND + '/api/selection', { headers: H }).then(r => r.json()); sel = new Set((s.ids || []).map(Number)); } catch {}
       // build filter dropdowns
       const catSel = document.getElementById('cat'), typeSel = document.getElementById('type');
       [...new Set(items.map(i => i.category))].filter(Boolean).sort((a,b)=>(cats[a]||'').localeCompare(cats[b]||''))
@@ -160,8 +161,15 @@
 
     function pick(id, on) { on ? sel.add(id) : sel.delete(id); persist(); render(); }
     function toggleAll(cb) { filtered().forEach(i => cb.checked ? sel.add(i.id) : sel.delete(i.id)); persist(); render(); }
-    function persist() { localStorage.setItem('mix_selection', JSON.stringify([...sel])); }
-    function saveSel() { persist(); alert(`Saved ${sel.size} items as the store selection.`); }
+    let saveTimer = null;
+    function persist() { // shared: save to server (debounced)
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => fetch(BACKEND + '/api/selection', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [...sel] }) }).catch(() => {}), 400);
+    }
+    async function saveSel() {
+      try { await fetch(BACKEND + '/api/selection', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [...sel] }) }); alert(`Saved ${sel.size} items as the shared store selection.`); }
+      catch (e) { alert('Save failed: ' + e.message); }
+    }
     function clearSel() { if (confirm('Clear selection?')) { sel.clear(); persist(); render(); } }
     function exportSel() {
       const chosen = items.filter(i => sel.has(i.id)).map(i => ({ id: i.id, title: i.title, type: i.type, category: cats[i.category] || i.category, min: prices[i.id]?.min, max: prices[i.id]?.max }));

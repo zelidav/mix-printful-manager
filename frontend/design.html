@@ -87,7 +87,7 @@
     const BACKEND = 'https://mix-printful-api-915738985818.us-east1.run.app';
     const acct = localStorage.getItem('mix_account') || '';
     const HDR = { 'X-Auth-Token': AUTH_TOKEN, 'X-PF-Account': acct };
-    let selection = JSON.parse(localStorage.getItem('mix_selection') || '[]');
+    let selection = [];   // shared selection, loaded from the server
     let catalogTitles = {};
 
     // Hue offsets from the source red mark. 0 = original.
@@ -187,6 +187,7 @@
 
     async function loadSelection() {
       const info = document.getElementById('selInfo'), btn = document.getElementById('pubBtn');
+      try { const s = await fetch(BACKEND + '/api/selection', { headers: HDR }).then(r => r.json()); selection = (s.ids || []).map(Number); } catch {}
       btn.textContent = `Create & Publish (${selection.length})`;
       if (!selection.length) return;
       try {
