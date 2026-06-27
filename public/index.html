@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Made in Xiaolin — Printful</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    header { background: #111; border-bottom: 1px solid #333; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 20px; color: #fff; }
+    header h1 span { color: #7c5cfc; }
+    .controls { display: flex; gap: 12px; align-items: center; margin-left: auto; }
+    select, button, input[type="file"] { font-size: 14px; padding: 8px 14px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e0e0e0; cursor: pointer; }
+    button { background: #7c5cfc; color: #fff; border: none; font-weight: 600; }
+    button:hover { background: #6a4ae0; }
+    button.secondary { background: #333; }
+    button.secondary:hover { background: #444; }
+    button.danger { background: #dc3545; }
+    button.push-all { background: #28a745; }
+    button.push-all:hover { background: #218838; }
+
+    .container { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
+    .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .toolbar label { font-size: 14px; color: #999; }
+
+    .status { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; display: none; }
+    .status.success { display: block; background: #143d1a; border: 1px solid #28a745; }
+    .status.error { display: block; background: #3d1419; border: 1px solid #dc3545; }
+    .status.info { display: block; background: #1a2a4a; border: 1px solid #4a8cdc; }
+
+    table { width: 100%; border-collapse: collapse; background: #111; border-radius: 8px; overflow: hidden; }
+    th { background: #1a1a1a; text-align: left; padding: 12px 16px; font-size: 13px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #333; }
+    td { padding: 10px 16px; border-bottom: 1px solid #222; vertical-align: top; }
+    td input, td textarea { width: 100%; background: #1a1a1a; border: 1px solid #333; color: #e0e0e0; padding: 6px 10px; border-radius: 4px; font-size: 14px; font-family: inherit; }
+    td textarea { min-height: 60px; resize: vertical; }
+    td input:focus, td textarea:focus { outline: none; border-color: #7c5cfc; }
+    td .price-input { width: 100px; text-align: right; }
+    .product-name { font-weight: 600; color: #fff; min-width: 200px; }
+    .variant-count { color: #999; font-size: 12px; cursor: pointer; user-select: none; }
+    .variant-count:hover { color: #7c5cfc; }
+    .row-actions { display: flex; gap: 6px; }
+    .row-actions button { padding: 4px 10px; font-size: 12px; }
+    .variant-row td { background: #0d0d0d; border-bottom: 1px solid #1a1a1a; padding: 6px 16px; font-size: 13px; }
+    .variant-row td:first-child { padding-left: 76px; }
+    .variant-label { color: #888; }
+    .variant-size { color: #ccc; font-weight: 500; }
+    .variant-color { color: #999; }
+
+    .spinner { display: none; }
+    .spinner.active { display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; margin-left: 8px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .modal h2 { margin-bottom: 16px; }
+    .modal .preview-table { font-size: 13px; }
+    .modal .preview-table td { padding: 6px 10px; }
+    .modal-actions { display: flex; gap: 12px; margin-top: 16px; justify-content: flex-end; }
+
+    .empty { text-align: center; padding: 60px; color: #666; }
+    .empty p { margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Made in Xiaolin</span> · Printful</h1>
+    <div class="controls">
+      <select id="accountSelect" title="Store (each has its own PAT)" style="border-color:#d4af37;color:#f0d27a;font-weight:600;"></select>
+      <select id="storeSelect" style="display:none;"><option value="">Select a store...</option></select>
+      <button onclick="loadProducts()" class="secondary">Load Products</button>
+      <button onclick="exportCSV()" class="secondary">Export CSV</button>
+      <label style="cursor:pointer">
+        <button onclick="this.parentElement.querySelector('input').click()" class="secondary">Import CSV</button>
+        <input type="file" accept=".csv" onchange="importCSV(this)" style="display:none">
+      </label>
+      <button onclick="saveAll('selected')" class="push-all" id="btnSaveAll" style="display:none;">Save All to Store</button>
+      <button onclick="saveAll('all')" class="push-all" id="btnSaveAllStores" style="display:none;background:#7c5cfc;">Save All to All Stores</button>
+      <span class="spinner" id="globalSpinner"></span>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="status" id="statusBar"></div>
+
+    <div id="productTable">
+      <div class="empty">
+        <p>Select a store and click <strong>Load Products</strong> to get started.</p>
+        <p>Or <strong>Import CSV</strong> to load product updates from a file.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const AUTH_TOKEN = sessionStorage.getItem('auth_token') || new URLSearchParams(window.location.search).get('token') || '';
+    if (!AUTH_TOKEN) window.location.href = '/login';
+
+    let currentAccount = localStorage.getItem('mix_account') || '';
+
+    function authFetch(url, opts = {}) {
+      opts.headers = opts.headers || {};
+      opts.headers['X-Auth-Token'] = AUTH_TOKEN;
+      if (currentAccount) opts.headers['X-PF-Account'] = currentAccount;
+      return fetch(url, opts);
+    }
+
+    let currentProducts = [];
+    let csvData = [];
+    let storeList = [];
+
+    // Load the configured MiX stores (each backed by its own PAT), then that store's Printful catalog.
+    async function initAccounts() {
+      const aSel = document.getElementById('accountSelect');
+      let accounts = [];
+      try { accounts = await authFetch('/api/accounts').then(r => r.json()); } catch (e) { accounts = []; }
+      if (!accounts.length) { aSel.innerHTML = '<option>No stores configured</option>'; return; }
+      if (!accounts.some(a => a.id === currentAccount)) currentAccount = accounts[0].id;
+      aSel.innerHTML = '';
+      accounts.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.id; opt.textContent = a.name;
+        if (a.id === currentAccount) opt.selected = true;
+        aSel.appendChild(opt);
+      });
+      aSel.onchange = () => {
+        currentAccount = aSel.value;
+        localStorage.setItem('mix_account', currentAccount);
+        currentProducts = [];
+        document.getElementById('productTable').innerHTML =
+          '<div class="empty"><p>Click <strong>Load Products</strong>.</p></div>';
+        document.getElementById('btnSaveAll').style.display = 'none';
+        document.getElementById('btnSaveAllStores').style.display = 'none';
+        loadStores();
+      };
+      loadStores();
+    }
+
+    // Load the selected store's Printful store(s); auto-select when there's just one.
+    async function loadStores() {
+      const sel = document.getElementById('storeSelect');
+      sel.innerHTML = '<option value="">Select a store...</option>';
+      try {
+        const stores = await authFetch('/api/stores').then(r => r.json());
+        storeList = Array.isArray(stores) ? stores : [];
+        storeList.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id; opt.textContent = s.name;
+          sel.appendChild(opt);
+        });
+        if (storeList.length === 1) {
+          sel.value = storeList[0].id;          // auto-select the single Printful store
+          sel.style.display = 'none';
+        } else {
+          sel.style.display = '';
+        }
+        showStatus(`${storeList.length} Printful store(s) for this PAT`, 'success');
+      } catch (e) {
+        showStatus('Failed to load stores: ' + e.message, 'error');
+      }
+    }
+
+    initAccounts();
+
+    function currentStorePlatform() {
+      const storeId = Number(document.getElementById('storeSelect').value);
+      const store = storeList.find(s => s.id === storeId);
+      return store?.platform || 'unknown';
+    }
+
+    function currentStoreIsNative() {
+      return currentStorePlatform() === 'native';
+    }
+
+    function showStatus(msg, type = 'info') {
+      const bar = document.getElementById('statusBar');
+      bar.className = 'status ' + type;
+      bar.textContent = msg;
+      if (type === 'success') setTimeout(() => bar.className = 'status', 5000);
+    }
+
+    function spinner(on) {
+      document.getElementById('globalSpinner').className = on ? 'spinner active' : 'spinner';
+    }
+
+    async function loadProducts() {
+      const storeId = document.getElementById('storeSelect').value;
+      if (!storeId) return showStatus('Select a store first', 'error');
+
+      spinner(true);
+      showStatus('Loading products...', 'info');
+      try {
+        const res = await authFetch(`/api/stores/${storeId}/products`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        currentProducts = data;
+        csvImportMode = false;
+        renderTable();
+        document.getElementById('btnSaveAll').style.display = 'inline-block';
+        document.getElementById('btnSaveAllStores').style.display = 'inline-block';
+        showStatus(`Loaded ${data.length} products`, 'success');
+      } catch (err) {
+        showStatus('Error: ' + err.message, 'error');
+      }
+      spinner(false);
+    }
+
+    function renderTable() {
+      const container = document.getElementById('productTable');
+      if (!currentProducts.length) {
+        container.innerHTML = '<div class="empty"><p>No products found in this store.</p></div>';
+        return;
+      }
+      const platform = currentStorePlatform();
+      const isWoo = platform === 'woocommerce';
+      const canEdit = csvImportMode || platform === 'native' || isWoo;
+      const showWooCols = isWoo && !csvImportMode;
+      // For CSV imports, check if woo_retail column exists
+      const csvHasWoo = csvImportMode && currentProducts.some(p => p.woo_price);
+
+      let html = `<table>
+        <thead><tr>
+          <th>Img</th>
+          ${showWooCols ? '<th>Woo</th>' : ''}
+          <th>Product Name</th>
+          <th>Description</th>
+          <th>Wholesale</th>
+          <th>Retail Price</th>
+          ${showWooCols ? '<th>Woo Retail</th>' : ''}
+          ${csvHasWoo ? '<th>Woo Retail</th>' : ''}
+          <th>Margin</th>
+          <th>Variants</th>
+          <th>Actions</th>
+        </tr></thead><tbody>`;
+
+      currentProducts.forEach((p, i) => {
+        const sp = p.sync_product;
+        const price = p.sync_variants[0]?.retail_price || '';
+        const wholesale = p.sync_variants[0]?.wholesale_price || '';
+        const wooPrice = p.woo_price || '';
+        const wooImage = p.woo_image || '';
+        const effectivePrice = (showWooCols || csvHasWoo) ? (wooPrice || price) : price;
+        const margin = (effectivePrice && wholesale) ? (((parseFloat(effectivePrice) - parseFloat(wholesale)) / parseFloat(effectivePrice)) * 100).toFixed(1) + '%' : '—';
+        const thumb = sp.thumbnail_url || '';
+        const hasDiffPrices = new Set(p.sync_variants.map(v => v.retail_price)).size > 1 || new Set(p.sync_variants.map(v => v.wholesale_price)).size > 1;
+        const priceMismatch = (showWooCols || csvHasWoo) && wooPrice && price && wooPrice !== price;
+        html += `<tr data-index="${i}">
+          <td style="width:70px;padding:6px;">
+            ${thumb ? `<img src="${esc(thumb)}" alt="" style="width:50px;height:50px;object-fit:cover;border-radius:6px;border:1px solid #333;cursor:pointer;" onclick="showImageModal(${i},'printful')">` : '<span style="color:#666;">—</span>'}
+          </td>
+          ${showWooCols ? `<td style="width:70px;padding:6px;">
+            ${wooImage ? `<img src="${esc(wooImage)}" alt="" style="width:50px;height:50px;object-fit:cover;border-radius:6px;border:1px solid #333;cursor:pointer;" onclick="showImageModal(${i},'woo')">` : '<span style="color:#666;">—</span>'}
+          </td>` : ''}
+          <td class="product-name">
+            <input value="${esc(sp.name)}" data-field="name" data-index="${i}">
+          </td>
+          <td>
+            <textarea data-field="description" data-index="${i}">${showWooCols ? esc(stripHtml(p.woo_description || sp.description || '')) : esc(sp.description || '')}</textarea>
+          </td>
+          <td style="color:#999;font-size:13px;">$${esc(wholesale)}${hasDiffPrices ? ' <span style="color:#ffc107;font-size:11px;">varies</span>' : ''}</td>
+          <td>
+            <input class="price-input" value="${esc(showWooCols ? wooPrice || price : price)}" data-field="retail_price" data-index="${i}" placeholder="0.00">
+            ${priceMismatch ? '<div style="color:#ffc107;font-size:10px;margin-top:2px;">Printful: $'+esc(price)+'</div>' : ''}
+          </td>
+          ${showWooCols ? `<td style="font-size:13px;color:#999;">$${esc(wooPrice)}</td>` : ''}
+          ${csvHasWoo ? `<td style="font-size:13px;color:#999;">$${esc(wooPrice)}</td>` : ''}
+          <td style="color:${parseFloat(margin)>40?'#28a745':parseFloat(margin)>20?'#ffc107':'#dc3545'};font-size:13px;font-weight:600;">${margin}</td>
+          <td><span class="variant-count" onclick="toggleVariants(${i})">${p.sync_variants.length} variant${p.sync_variants.length !== 1 ? 's' : ''} ▸</span></td>
+          <td class="row-actions">
+            <button onclick="saveRow(${i})">Save</button>
+          </td>
+        </tr>`;
+        // Variant detail rows (hidden by default)
+        p.sync_variants.forEach((v, vi) => {
+          const vWholesale = v.wholesale_price || '';
+          const vRetail = v.retail_price || '';
+          const vMargin = (vRetail && vWholesale) ? (((parseFloat(vRetail) - parseFloat(vWholesale)) / parseFloat(vRetail)) * 100).toFixed(1) + '%' : '—';
+          const colOffset = showWooCols ? 3 : 2;
+          html += `<tr class="variant-row" data-parent="${i}" style="display:none;">
+            <td colspan="${colOffset}">
+              <span class="variant-size" style="padding-left:60px;">${esc(v.size || '')}${v.color ? ' / ' : ''}${esc(v.color || '')}</span>
+              <span class="variant-label" style="margin-left:8px;">${esc(v.sku || '')}</span>
+            </td>
+            <td></td>
+            <td style="color:#999;font-size:13px;">$${esc(vWholesale)}</td>
+            <td style="font-size:13px;color:#e0e0e0;">$${esc(vRetail)}</td>
+            ${showWooCols ? '<td></td>' : ''}
+            ${csvHasWoo ? '<td></td>' : ''}
+            <td style="color:${parseFloat(vMargin)>40?'#28a745':parseFloat(vMargin)>20?'#ffc107':'#dc3545'};font-size:13px;font-weight:600;">${vMargin}</td>
+            <td></td>
+            <td></td>
+          </tr>`;
+        });
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    async function saveRow(index) {
+      const storeId = document.getElementById('storeSelect').value;
+      const p = currentProducts[index];
+      const row = document.querySelector(`tr[data-index="${index}"]`);
+      const name = row.querySelector('[data-field="name"]').value;
+      const description = row.querySelector('[data-field="description"]').value;
+      const retail_price = row.querySelector('[data-field="retail_price"]').value;
+
+      spinner(true);
+      showStatus(`Saving ${name}...`, 'info');
+      try {
+        const saveRes = await authFetch(`/api/stores/${storeId}/save/${index}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description,
+            retail_price,
+            sync_product_id: p.sync_product.id,
+            external_id: p.sync_product.external_id,
+            variants: p.sync_variants.map(v => ({ id: v.id, external_id: v.external_id })),
+          }),
+        });
+        const result = await saveRes.json();
+        if (result.error) throw new Error(result.error);
+        const via = result.platform === 'woocommerce' ? 'WooCommerce' : result.platform === 'native' ? 'Printful' : result.platform;
+        showStatus(`Saved ${name} via ${via}`, 'success');
+      } catch (err) {
+        showStatus('Error saving: ' + err.message, 'error');
+      }
+      spinner(false);
+    }
+
+    function exportCSV() {
+      const storeId = document.getElementById('storeSelect').value;
+      if (!storeId) return showStatus('Select a store first', 'error');
+      window.open(`/api/stores/${storeId}/export?token=${AUTH_TOKEN}&account=${encodeURIComponent(currentAccount)}`);
+    }
+
+    let csvImportMode = false;
+
+    function importCSV(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+
+      authFetch('/api/csv/upload', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          csvData = data;
+          loadCSVIntoTable();
+        })
+        .catch(err => showStatus('CSV Error: ' + err.message, 'error'));
+
+      input.value = '';
+    }
+
+    function loadCSVIntoTable() {
+      if (!csvData.length) return;
+      const cols = Object.keys(csvData[0]);
+
+      // Smart column mapping — detect by header name or content
+      function findCol(...names) {
+        return names.find(n => cols.includes(n)) || null;
+      }
+      const colSku = findCol('sku');
+      const colName = findCol('product_name', 'name');
+      const colDesc = findCol('description', 'desc');
+      const colPrice = findCol('woo_retail', 'retail_price', 'printful_retail', 'price', 'regular_price');
+      const colWholesale = findCol('wholesale_price', 'wholesale');
+      const colExtId = findCol('woo_id', 'external_id', 'id');
+      const colVariantId = findCol('variant_id');
+      const colVariantName = findCol('variant_name');
+      const colSize = findCol('size');
+      const colColor = findCol('color');
+
+      // Group rows by woo_id, external_id, SKU, or name
+      const grouped = {};
+      for (const row of csvData) {
+        const name = row[colName] || '';
+        const key = row[colExtId] || row[colSku] || name || Math.random();
+        if (!grouped[key]) grouped[key] = { rows: [], first: row, name };
+        grouped[key].rows.push(row);
+      }
+
+      currentProducts = Object.values(grouped).map(g => {
+        const r = g.first;
+        const name = g.name || r[colName] || '';
+        const price = r[colPrice] || '';
+        return {
+          sync_product: {
+            id: r[colVariantId] || '',
+            name: name,
+            description: r[colDesc] || '',
+            external_id: r[colExtId] || '',
+            thumbnail_url: '',
+          },
+          sync_variants: g.rows.map(row => ({
+            id: row[colVariantId] || '',
+            external_id: row[colExtId] || '',
+            name: row[colVariantName] || row[colName] || '',
+            size: row[colSize] || '',
+            color: row[colColor] || '',
+            sku: row[colSku] || '',
+            retail_price: row[colPrice] || '',
+            wholesale_price: row[colWholesale] || '',
+          })),
+          woo_price: price,
+          woo_image: '',
+          woo_description: r[colDesc] || '',
+          _csv: true,
+          _sku: r[colSku] || '',
+        };
+      });
+
+      csvImportMode = true;
+      renderTable();
+      document.getElementById('btnSaveAll').style.display = 'inline-block';
+      document.getElementById('btnSaveAllStores').style.display = 'inline-block';
+      showStatus(`Loaded ${csvData.length} rows (${Object.keys(grouped).length} products). Review and hit Save All.`, 'info');
+    }
+
+    function closeModal() {
+      document.getElementById('csvModal').classList.remove('active');
+    }
+
+    function gatherTableUpdates() {
+      return currentProducts.map((p, i) => {
+        const row = document.querySelector(`tr[data-index="${i}"]`);
+        if (!row) return null;
+        return {
+          product_name: row.querySelector('[data-field="name"]')?.value || p.sync_product.name,
+          description: row.querySelector('[data-field="description"]')?.value || '',
+          retail_price: row.querySelector('[data-field="retail_price"]')?.value || '',
+          woo_id: p.sync_product.external_id,
+          external_id: p.sync_product.external_id,
+          variant_id: p.sync_variants[0]?.id,
+          sku: p._sku || p.sync_variants[0]?.sku || '',
+        };
+      }).filter(Boolean);
+    }
+
+    async function saveAll(target) {
+      if (!currentProducts.length) return showStatus('Load products or import CSV first', 'error');
+      const storeId = document.getElementById('storeSelect').value;
+      if (target === 'selected' && !storeId) return showStatus('Select a store first', 'error');
+      const sendStoreId = target === 'selected' ? storeId : undefined;
+      const label = target === 'selected' ? (storeList.find(s => String(s.id) === storeId)?.name || 'selected store') : 'all stores';
+
+      spinner(true);
+      showStatus(`Saving ${currentProducts.length} products to ${label}...`, 'info');
+
+      const updates = gatherTableUpdates();
+      try {
+        const res = await authFetch('/api/push-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updates, storeId: sendStoreId }),
+        });
+        const result = await res.json();
+        const msg = `Done! ${result.success.length} saved to ${label}, ${result.errors.length} errors.`;
+        showStatus(msg, result.errors.length ? 'error' : 'success');
+        if (result.errors.length) console.log('Errors:', result.errors);
+      } catch (err) {
+        showStatus('Save failed: ' + err.message, 'error');
+      }
+      spinner(false);
+    }
+
+    function toggleVariants(productIndex) {
+      const rows = document.querySelectorAll(`tr.variant-row[data-parent="${productIndex}"]`);
+      const toggle = document.querySelector(`tr[data-index="${productIndex}"] .variant-count`);
+      const visible = rows[0]?.style.display !== 'none';
+      rows.forEach(r => r.style.display = visible ? 'none' : 'table-row');
+      toggle.textContent = toggle.textContent.replace(visible ? '▾' : '▸', visible ? '▸' : '▾');
+    }
+
+    function showImageModal(productIndex, source) {
+      const p = currentProducts[productIndex];
+      const src = source === 'woo' ? p.woo_image : p.sync_product.thumbnail_url;
+      const name = p.sync_product.name;
+      const label_text = source === 'woo' ? `${name} (WooCommerce)` : `${name} (Printful)`;
+      if (!src) return;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:200;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:12px;';
+      overlay.onclick = () => overlay.remove();
+      const img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-width:90vw;max-height:75vh;border-radius:8px;border:1px solid #444;';
+      const label = document.createElement('div');
+      label.style.cssText = 'color:#ccc;font-size:14px;';
+      label.textContent = label_text;
+      const urlLine = document.createElement('a');
+      urlLine.href = src;
+      urlLine.target = '_blank';
+      urlLine.style.cssText = 'color:#7c5cfc;font-size:12px;word-break:break-all;max-width:80vw;text-align:center;';
+      urlLine.textContent = src;
+      overlay.appendChild(img);
+      overlay.appendChild(label);
+      overlay.appendChild(urlLine);
+      document.body.appendChild(overlay);
+    }
+
+    function stripHtml(html) {
+      const d = document.createElement('div');
+      d.innerHTML = html;
+      return d.textContent || d.innerText || '';
+    }
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>
