@@ -124,7 +124,7 @@ function register(app, resolveAccount) {
     const token = resolveAccount(req).token;
     try {
       const storeId = await nativeStoreId(token);
-      await request('DELETE', `/store/products/${req.params.id}`, token, storeId);
+      await request('DELETE', `/sync/products/${req.params.id}`, token, storeId); // /store/ 500s on native; /sync/ works
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
