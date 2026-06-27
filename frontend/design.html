@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Made in Xiaolin — Design Tool</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    header { background: #111; border-bottom: 1px solid #333; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 20px; color: #fff; }
+    header h1 span { color: #d4af37; }
+    header a { margin-left: auto; color: #9ab; font-size: 13px; text-decoration: none; }
+    .wrap { display: grid; grid-template-columns: 300px 1fr 280px; gap: 20px; max-width: 1300px; margin: 22px auto; padding: 0 22px; }
+    .panel { background: #111; border: 1px solid #2a2a2a; border-radius: 12px; padding: 16px; }
+    .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #888; margin-bottom: 12px; }
+    .logo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 70vh; overflow-y: auto; }
+    .logo-grid img { width: 100%; height: 76px; object-fit: contain; background: #1c1c1c; border: 2px solid #2a2a2a; border-radius: 8px; padding: 6px; cursor: pointer; }
+    .logo-grid img.sel { border-color: #d4af37; background: #16130a; }
+    label { display: block; font-size: 12px; color: #999; margin: 14px 0 6px; }
+    input[type=text] { width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #eee; font-size: 15px; }
+    .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+    .sw { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 2px solid #2a2a2a; }
+    .sw.sel { border-color: #fff; }
+    .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+    .seg button { flex: 1; padding: 8px; font-size: 12px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #ccc; cursor: pointer; }
+    .seg button.on { background: #d4af37; color: #1a1a1a; border-color: #d4af37; font-weight: 700; }
+    .preview { background: repeating-conic-gradient(#1a1a1a 0% 25%, #161616 0% 50%) 50% / 28px 28px; border: 1px solid #2a2a2a; border-radius: 12px; display: flex; align-items: center; justify-content: center; min-height: 60vh; padding: 16px; }
+    .preview canvas { max-width: 100%; max-height: 64vh; }
+    button.primary { width: 100%; padding: 12px; border-radius: 8px; border: none; background: #d4af37; color: #1a1a1a; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 8px; }
+    button.primary:hover { background: #e3c351; }
+    .hint { color: #666; font-size: 11px; margin-top: 10px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Made in Xiaolin</span> · Design Tool</h1>
+    <a href="index.html">← Back to manager</a>
+  </header>
+
+  <div class="wrap">
+    <div class="panel">
+      <h2>Xiaolin logo</h2>
+      <div class="logo-grid" id="logoGrid"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Preview</h2>
+      <div class="preview"><canvas id="cv"></canvas></div>
+    </div>
+
+    <div class="panel">
+      <h2>Store name</h2>
+      <input type="text" id="storeName" value="DAVES DISPENSARY" oninput="render()">
+
+      <label>Logo color</label>
+      <div class="swatches" id="swatches"></div>
+
+      <label>Text color</label>
+      <div class="seg" id="textColor">
+        <button data-v="match" class="on">Match logo</button>
+        <button data-v="#ffffff">White</button>
+        <button data-v="#111111">Black</button>
+      </div>
+
+      <label>Text case</label>
+      <div class="seg" id="textCase">
+        <button data-v="upper" class="on">UPPER</button>
+        <button data-v="as">As typed</button>
+      </div>
+
+      <button class="primary" onclick="download()">Download print PNG</button>
+      <div class="hint">Transparent PNG, ~3600px wide — drop straight into Printful as a print file. Colors recolor the red mark; gold/white variants shift accordingly.</div>
+    </div>
+  </div>
+
+  <script>
+    const AUTH_TOKEN = sessionStorage.getItem('auth_token') || '';
+    if (!AUTH_TOKEN) window.location.href = 'login.html';
+
+    // Hue offsets from the source red mark. 0 = original.
+    const COLORS = [
+      { name: 'Original', hue: 0 },
+      { name: 'Crimson', hue: 350 }, { name: 'Orange', hue: 28 }, { name: 'Gold', hue: 45 },
+      { name: 'Green', hue: 110 }, { name: 'Teal', hue: 165 }, { name: 'Sky', hue: 200 },
+      { name: 'Blue', hue: 225 }, { name: 'Indigo', hue: 255 }, { name: 'Purple', hue: 285 }, { name: 'Magenta', hue: 320 },
+    ];
+    let logos = [], sel = 0, hue = 0, textColorMode = 'match', textCase = 'upper';
+    const imgCache = {};
+
+    function baseColorHex(h) { // red base #d11f27 shifted by hue, for "match" text + swatch
+      const c = document.createElement('canvas'); c.width = c.height = 1;
+      const x = c.getContext('2d');
+      x.filter = `hue-rotate(${h}deg) saturate(1.1)`;
+      x.fillStyle = '#d11f27'; x.fillRect(0, 0, 1, 1);
+      const d = x.getImageData(0, 0, 1, 1).data;
+      return `rgb(${d[0]},${d[1]},${d[2]})`;
+    }
+
+    function loadImg(src) {
+      return imgCache[src] || (imgCache[src] = new Promise(res => { const i = new Image(); i.onload = () => res(i); i.src = src; }));
+    }
+
+    async function buildGrid() {
+      logos = await fetch('logos.json').then(r => r.json());
+      const g = document.getElementById('logoGrid');
+      logos.forEach((l, i) => {
+        const im = document.createElement('img');
+        im.src = l.file; im.className = i === sel ? 'sel' : '';
+        im.onclick = () => { sel = i; [...g.children].forEach((c, j) => c.className = j === i ? 'sel' : ''); render(); };
+        g.appendChild(im);
+      });
+      const sw = document.getElementById('swatches');
+      COLORS.forEach((c, i) => {
+        const s = document.createElement('div');
+        s.className = 'sw' + (i === 0 ? ' sel' : ''); s.title = c.name;
+        s.style.background = baseColorHex(c.hue);
+        s.onclick = () => { hue = c.hue; [...sw.children].forEach((x, j) => x.className = 'sw' + (j === i ? ' sel' : '')); render(); };
+        sw.appendChild(s);
+      });
+      document.querySelectorAll('#textColor button').forEach(b => b.onclick = () => {
+        textColorMode = b.dataset.v; document.querySelectorAll('#textColor button').forEach(x => x.classList.toggle('on', x === b)); render();
+      });
+      document.querySelectorAll('#textCase button').forEach(b => b.onclick = () => {
+        textCase = b.dataset.v; document.querySelectorAll('#textCase button').forEach(x => x.classList.toggle('on', x === b)); render();
+      });
+      render();
+    }
+
+    async function compose(ctx, scale) {
+      const logo = await loadImg(logos[sel].file);
+      const LW = 1200 * scale, margin = 80 * scale, gap = 60 * scale;
+      const lw = LW, lh = LW * logo.height / logo.width;     // keep aspect — no distortion
+      let txt = document.getElementById('storeName').value || '';
+      if (textCase === 'upper') txt = txt.toUpperCase();
+      const fontPx = Math.round(180 * scale);
+      ctx.font = `900 ${fontPx}px "Arial Black", Arial, sans-serif`;
+      let tw = ctx.measureText(txt).width;
+      const maxW = LW;
+      let fpx = fontPx;
+      if (tw > maxW) { fpx = Math.floor(fontPx * maxW / tw); ctx.font = `900 ${fpx}px "Arial Black", Arial, sans-serif`; tw = ctx.measureText(txt).width; }
+      const textH = txt ? fpx * 1.1 : 0;
+      const W = Math.ceil(Math.max(lw, tw) + margin * 2);
+      const H = Math.ceil(margin + lh + (txt ? gap + textH : 0) + margin);
+      ctx.canvas.width = W; ctx.canvas.height = H;
+      ctx.clearRect(0, 0, W, H);
+      // logo (recolored)
+      ctx.save();
+      ctx.filter = hue ? `hue-rotate(${hue}deg) saturate(1.1)` : 'none';
+      ctx.drawImage(logo, (W - lw) / 2, margin, lw, lh);
+      ctx.restore();
+      // store name
+      if (txt) {
+        ctx.font = `900 ${fpx}px "Arial Black", Arial, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillStyle = textColorMode === 'match' ? baseColorHex(hue) : textColorMode;
+        ctx.fillText(txt, W / 2, margin + lh + gap);
+      }
+      return { W, H };
+    }
+
+    async function render() {
+      await compose(document.getElementById('cv').getContext('2d'), 1);
+    }
+
+    async function download() {
+      const c = document.createElement('canvas');
+      await compose(c.getContext('2d'), 3);   // ~3600px wide print file
+      c.toBlob(b => {
+        const a = document.createElement('a');
+        const name = (document.getElementById('storeName').value || 'xiaolin').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        a.href = URL.createObjectURL(b); a.download = `mix-${name}-logo${sel}.png`; a.click();
+      }, 'image/png');
+    }
+
+    buildGrid();
+  </script>
+</body>
+</html>
