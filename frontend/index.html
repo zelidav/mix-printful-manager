@@ -93,8 +93,10 @@
   </div>
 
   <script>
+    // Cloud Run API base (this static site is hosted on GitHub Pages)
+    const BACKEND = 'https://mix-printful-api-915738985818.us-east1.run.app';
     const AUTH_TOKEN = sessionStorage.getItem('auth_token') || new URLSearchParams(window.location.search).get('token') || '';
-    if (!AUTH_TOKEN) window.location.href = '/login';
+    if (!AUTH_TOKEN) window.location.href = 'login.html';
 
     let currentAccount = localStorage.getItem('mix_account') || '';
 
@@ -102,7 +104,7 @@
       opts.headers = opts.headers || {};
       opts.headers['X-Auth-Token'] = AUTH_TOKEN;
       if (currentAccount) opts.headers['X-PF-Account'] = currentAccount;
-      return fetch(url, opts);
+      return fetch(BACKEND + url, opts);
     }
 
     let currentProducts = [];
@@ -333,7 +335,7 @@
     function exportCSV() {
       const storeId = document.getElementById('storeSelect').value;
       if (!storeId) return showStatus('Select a store first', 'error');
-      window.open(`/api/stores/${storeId}/export?token=${AUTH_TOKEN}&account=${encodeURIComponent(currentAccount)}`);
+      window.open(`${BACKEND}/api/stores/${storeId}/export?token=${AUTH_TOKEN}&account=${encodeURIComponent(currentAccount)}`);
     }
 
     let csvImportMode = false;

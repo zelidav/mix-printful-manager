@@ -33,8 +33,9 @@
   </div>
 
   <script>
+    const BACKEND = 'https://mix-printful-api-915738985818.us-east1.run.app';
     if (sessionStorage.getItem('auth_token')) {
-      window.location.href = '/?token=' + sessionStorage.getItem('auth_token');
+      window.location.href = 'index.html';
     }
     function showErr(msg) {
       const e = document.getElementById('error');
@@ -42,7 +43,7 @@
       e.style.display = 'block';
     }
     async function postLogin(body) {
-      const res = await fetch('/api/login', {
+      const res = await fetch(BACKEND + '/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -50,7 +51,7 @@
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         sessionStorage.setItem('auth_token', data.token);
-        window.location.href = '/?token=' + data.token;
+        window.location.href = 'index.html';
       } else {
         showErr(data.error);
       }

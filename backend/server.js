@@ -3,13 +3,14 @@ const express = require('express');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { stringify } = require('csv-stringify/sync');
-const path = require('path');
 const { getProducts, getProduct, updateProduct, updateVariant, enrichWithWholesale, platformOf, getStoresLive } = require('./printful');
 const { getAccount, publicList } = require('./accounts');
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ dest: require('os').tmpdir() }); // Cloud Run: only /tmp is writable
 const APP_PASSWORD = process.env.APP_PASSWORD || 'MIXxiaolin!';
+// Frontend (GitHub Pages) origin allowed to call this API. Comma-separated; '*' allows all.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://zelidav.github.io';
 
 function getPlatform(storeId) { return platformOf(storeId); }
 
@@ -17,14 +18,28 @@ function getPlatform(storeId) { return platformOf(storeId); }
 function resolveAccount(req) { return getAccount(req.headers['x-pf-account'] || req.query.account); }
 async function accountStores(acct) { return await getStoresLive(acct.token); } // also seeds platform cache
 
+// CORS for the static frontend on GitHub Pages
+app.use((req, res, next) => {
+  const allow = ALLOWED_ORIGIN.split(',').map(s => s.trim());
+  const origin = req.headers.origin;
+  res.setHeader('Access-Control-Allow-Origin', allow.includes('*') ? '*' : (allow.includes(origin) ? origin : allow[0]));
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Auth-Token, X-PF-Account');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use(express.json());
 
-// Password gate
+// Health check (Cloud Run root)
+app.get('/', (req, res) => res.json({ ok: true, service: 'mix-printful-api' }));
+
+// Password gate (API only — frontend is served by GitHub Pages)
 function requireAuth(req, res, next) {
-  if (req.path === '/login' || req.path === '/api/login') return next();
+  if (req.path === '/api/login') return next();
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token === APP_PASSWORD) return next();
-  if (req.accepts('html') && !req.path.startsWith('/api/')) return res.sendFile(path.join(__dirname, 'public', 'login.html'));
   res.status(401).json({ error: 'Unauthorized' });
 }
 app.post('/api/login', (req, res) => {
@@ -32,10 +47,7 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ error: 'Wrong password' });
 });
 
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
-
 app.use(requireAuth);
-app.use(express.static(path.join(__dirname, 'public')));
 
 // List the MiX stores (each backed by its own PAT) — no tokens exposed
 app.get('/api/accounts', (req, res) => res.json(publicList()));
@@ -201,5 +213,5 @@ app.get('/api/stores/:storeId/export', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3600;
-app.listen(PORT, () => console.log(`MiX Printful Manager running at http://localhost:${PORT}`));
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`MiX Printful API running on :${PORT}`));
