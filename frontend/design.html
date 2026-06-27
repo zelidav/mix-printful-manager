@@ -69,14 +69,26 @@
         <button data-v="as">As typed</button>
       </div>
 
-      <button class="primary" onclick="download()">Download print PNG</button>
-      <div class="hint">Transparent PNG, ~3600px wide — drop straight into Printful as a print file. Colors recolor the red mark; gold/white variants shift accordingly.</div>
+      <button onclick="download()" style="width:100%;padding:10px;border-radius:8px;border:1px solid #444;background:#1a1a1a;color:#ccc;cursor:pointer;margin-top:8px;">Download print PNG</button>
+
+      <hr style="border:none;border-top:1px solid #2a2a2a;margin:18px 0">
+      <h2>Publish to store</h2>
+      <div id="selInfo" class="hint">No products selected — go to <a href="catalog.html" style="color:#d4af37">Catalog</a> and pick items.</div>
+      <label>Price = blank × <input id="markup" type="number" value="2" step="0.5" min="1" style="width:64px;padding:6px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#eee"> &nbsp;<span class="hint" style="display:inline">rounded up</span></label>
+      <button class="primary" id="pubBtn" onclick="createPublish()" style="background:#28a745;color:#fff;margin-top:10px;">Create &amp; Publish (0)</button>
+      <div id="pubResults" class="hint" style="white-space:pre-wrap;max-height:180px;overflow:auto"></div>
+      <div class="hint">Each selected product is created on the store with this design centered, your store name in the copy, price = 2× blank rounded up, and on-brand insider description.</div>
     </div>
   </div>
 
   <script>
     const AUTH_TOKEN = sessionStorage.getItem('auth_token') || '';
     if (!AUTH_TOKEN) window.location.href = 'login.html';
+    const BACKEND = 'https://mix-printful-api-915738985818.us-east1.run.app';
+    const acct = localStorage.getItem('mix_account') || '';
+    const HDR = { 'X-Auth-Token': AUTH_TOKEN, 'X-PF-Account': acct };
+    let selection = JSON.parse(localStorage.getItem('mix_selection') || '[]');
+    let catalogTitles = {};
 
     // Hue offsets from the source red mark. 0 = original.
     const COLORS = [
@@ -173,7 +185,49 @@
       }, 'image/png');
     }
 
+    async function loadSelection() {
+      const info = document.getElementById('selInfo'), btn = document.getElementById('pubBtn');
+      btn.textContent = `Create & Publish (${selection.length})`;
+      if (!selection.length) return;
+      try {
+        const cat = await fetch(BACKEND + '/api/catalog', { headers: HDR }).then(r => r.json());
+        (cat.items || []).forEach(i => catalogTitles[i.id] = i.title);
+      } catch {}
+      const names = selection.map(id => catalogTitles[id] || ('#' + id));
+      info.innerHTML = '<b style="color:#e8e8e8">' + selection.length + ' selected:</b> ' + names.map(n => n.replace(/</g,'')).join(', ');
+    }
+
+    async function dataUrlAtScale(scale) {
+      const c = document.createElement('canvas');
+      await compose(c.getContext('2d'), scale);
+      return c.toDataURL('image/png');
+    }
+
+    async function createPublish() {
+      if (!selection.length) return alert('No products selected. Go to Catalog and pick items first.');
+      const btn = document.getElementById('pubBtn'), out = document.getElementById('pubResults');
+      const storeName = document.getElementById('storeName').value.trim();
+      const markup = parseFloat(document.getElementById('markup').value) || 2;
+      btn.disabled = true; const orig = btn.textContent;
+      btn.textContent = `Publishing ${selection.length}…`;
+      out.textContent = 'Compositing design + creating products on the store… (mockups take a moment)';
+      try {
+        const design = await dataUrlAtScale(3);
+        const r = await fetch(BACKEND + '/api/create', {
+          method: 'POST', headers: { ...HDR, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ design, productIds: selection, markup, storeName, name_suffix: storeName }),
+        }).then(r => r.json());
+        if (r.error) throw new Error(r.error);
+        const lines = (r.results || []).map(x => x.ok ? `✓ ${x.name} — $${x.retail} (${x.variants} variants)` : `✗ #${x.pid}: ${x.error}`);
+        out.textContent = `Created ${r.created}/${selection.length}:\n` + lines.join('\n');
+      } catch (e) {
+        out.textContent = 'Error: ' + e.message;
+      }
+      btn.disabled = false; btn.textContent = orig;
+    }
+
     buildGrid();
+    loadSelection();
   </script>
 </body>
 </html>

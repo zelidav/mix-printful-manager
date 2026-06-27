@@ -30,7 +30,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '30mb' })); // design PNGs (print files) can be several MB
 
 // Health check (Cloud Run root)
 app.get('/', (req, res) => res.json({ ok: true, service: 'mix-printful-api' }));
@@ -47,10 +47,15 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ error: 'Wrong password' });
 });
 
+// Public print-file host (Printful fetches it during ingest) — must be before auth
+require('./create').registerPublic(app);
+
 app.use(requireAuth);
 
 // Printful catalog browser (full list + pricing + categories)
 require('./catalog').register(app, resolveAccount);
+// Create + publish products to the native store
+require('./create').register(app, resolveAccount);
 
 // List the MiX stores (each backed by its own PAT) — no tokens exposed
 app.get('/api/accounts', (req, res) => res.json(publicList()));
