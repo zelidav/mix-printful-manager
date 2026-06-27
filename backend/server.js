@@ -49,6 +49,9 @@ app.post('/api/login', (req, res) => {
 
 app.use(requireAuth);
 
+// Printful catalog browser (full list + pricing + categories)
+require('./catalog').register(app, resolveAccount);
+
 // List the MiX stores (each backed by its own PAT) — no tokens exposed
 app.get('/api/accounts', (req, res) => res.json(publicList()));
 

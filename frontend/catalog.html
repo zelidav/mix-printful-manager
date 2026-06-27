@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Made in Xiaolin — Catalog</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    header { background: #111; border-bottom: 1px solid #333; padding: 14px 22px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    header h1 { font-size: 19px; color: #fff; } header h1 span { color: #d4af37; }
+    header a { color: #9ab; font-size: 13px; text-decoration: none; }
+    .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 14px 22px; background: #0d0d0d; border-bottom: 1px solid #222; }
+    input, select { font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e0e0e0; }
+    input[type=number] { width: 90px; }
+    .pill { font-size: 12px; color: #999; }
+    button { font-size: 13px; padding: 8px 12px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e0e0e0; cursor: pointer; }
+    button.gold { background: #d4af37; color: #1a1a1a; border: none; font-weight: 700; }
+    .wrap { padding: 0 22px 40px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { position: sticky; top: 0; background: #161616; text-align: left; padding: 10px 12px; font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #333; cursor: pointer; user-select: none; white-space: nowrap; }
+    th.nosort { cursor: default; }
+    th .arrow { color: #d4af37; }
+    td { padding: 8px 12px; border-bottom: 1px solid #1c1c1c; font-size: 14px; vertical-align: middle; }
+    tr:hover td { background: #121212; }
+    tr.sel td { background: #16130a; }
+    td img { width: 46px; height: 46px; object-fit: contain; background: #1c1c1c; border-radius: 6px; }
+    .title { font-weight: 600; color: #fff; }
+    .muted { color: #888; font-size: 12px; }
+    .disc { color: #c0633a; font-size: 11px; border: 1px solid #5a3220; border-radius: 4px; padding: 1px 5px; }
+    input[type=checkbox] { width: 17px; height: 17px; accent-color: #d4af37; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Made in Xiaolin</span> · Catalog</h1>
+    <a href="index.html">← Manager</a> <a href="design.html">Design Tool →</a>
+    <div class="right">
+      <span class="pill" id="selCount">Selected: 0</span>
+      <button class="gold" onclick="saveSel()">Save selection</button>
+      <button onclick="clearSel()">Clear</button>
+      <button onclick="exportSel()">Export JSON</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <input type="text" id="q" placeholder="Search name / brand…" oninput="render()">
+    <select id="cat" onchange="render()"><option value="">All categories</option></select>
+    <select id="type" onchange="render()"><option value="">All types</option></select>
+    <span class="pill">Price $</span>
+    <input type="number" id="pmin" placeholder="min" oninput="render()">
+    <input type="number" id="pmax" placeholder="max" oninput="render()">
+    <label class="pill"><input type="checkbox" id="hideDisc" onchange="render()" style="vertical-align:middle"> hide discontinued</label>
+    <label class="pill"><input type="checkbox" id="onlySel" onchange="render()" style="vertical-align:middle"> selected only</label>
+    <span class="pill" id="count"></span>
+    <span class="pill" id="priceStatus" style="color:#d4af37"></span>
+  </div>
+
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th class="nosort"><input type="checkbox" id="selAll" onchange="toggleAll(this)" title="select all (filtered)"></th>
+        <th class="nosort">Img</th>
+        <th data-k="title">Product</th>
+        <th data-k="brand">Brand</th>
+        <th data-k="type">Type</th>
+        <th data-k="category">Category</th>
+        <th data-k="variants">Variants</th>
+        <th data-k="min">Min $</th>
+        <th data-k="max">Max $</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const BACKEND = 'https://mix-printful-api-915738985818.us-east1.run.app';
+    const AUTH_TOKEN = sessionStorage.getItem('auth_token') || '';
+    if (!AUTH_TOKEN) window.location.href = 'login.html';
+    const acct = localStorage.getItem('mix_account') || '';
+    const H = { 'X-Auth-Token': AUTH_TOKEN, 'X-PF-Account': acct };
+
+    let items = [], cats = {}, prices = {};
+    let sel = new Set(JSON.parse(localStorage.getItem('mix_selection') || '[]'));
+    let sortK = 'title', sortDir = 1;
+
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+
+    async function load() {
+      const [catRes, catalogRes] = await Promise.all([
+        fetch(BACKEND + '/api/categories', { headers: H }).then(r => r.json()).catch(() => []),
+        fetch(BACKEND + '/api/catalog', { headers: H }).then(r => r.json()),
+      ]);
+      (Array.isArray(catRes) ? catRes : []).forEach(c => cats[c.id] = c.title || c.name || ('cat ' + c.id));
+      items = catalogRes.items || [];
+      // build filter dropdowns
+      const catSel = document.getElementById('cat'), typeSel = document.getElementById('type');
+      [...new Set(items.map(i => i.category))].filter(Boolean).sort((a,b)=>(cats[a]||'').localeCompare(cats[b]||''))
+        .forEach(id => catSel.add(new Option(cats[id] || ('cat ' + id), id)));
+      [...new Set(items.map(i => i.type))].filter(Boolean).sort()
+        .forEach(t => typeSel.add(new Option(t, t)));
+      render();
+      // prices load async (first time is slow — server computes once, then cached)
+      document.getElementById('priceStatus').textContent = 'loading prices…';
+      try {
+        const pr = await fetch(BACKEND + '/api/catalog/prices', { headers: H }).then(r => r.json());
+        prices = pr.prices || {};
+        document.getElementById('priceStatus').textContent = '';
+        render();
+      } catch { document.getElementById('priceStatus').textContent = 'prices unavailable'; }
+    }
+
+    function filtered() {
+      const q = document.getElementById('q').value.toLowerCase();
+      const cat = document.getElementById('cat').value, type = document.getElementById('type').value;
+      const pmin = parseFloat(document.getElementById('pmin').value), pmax = parseFloat(document.getElementById('pmax').value);
+      const hideDisc = document.getElementById('hideDisc').checked, onlySel = document.getElementById('onlySel').checked;
+      let out = items.filter(i => {
+        if (q && !((i.title||'').toLowerCase().includes(q) || (i.brand||'').toLowerCase().includes(q))) return false;
+        if (cat && String(i.category) !== cat) return false;
+        if (type && i.type !== type) return false;
+        if (hideDisc && i.discontinued) return false;
+        if (onlySel && !sel.has(i.id)) return false;
+        const mn = prices[i.id] && prices[i.id].min;
+        if (!isNaN(pmin) && (mn == null || mn < pmin)) return false;
+        if (!isNaN(pmax) && (mn == null || mn > pmax)) return false;
+        return true;
+      });
+      const val = (i) => sortK === 'min' ? (prices[i.id]?.min ?? 1e9)
+                       : sortK === 'max' ? (prices[i.id]?.max ?? 1e9)
+                       : sortK === 'category' ? (cats[i.category] || '')
+                       : (i[sortK] ?? '');
+      out.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * sortDir; });
+      return out;
+    }
+
+    function render() {
+      const rows = filtered();
+      document.getElementById('count').textContent = rows.length + ' of ' + items.length;
+      document.getElementById('selCount').textContent = 'Selected: ' + sel.size;
+      document.querySelectorAll('th[data-k]').forEach(th =>
+        th.innerHTML = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.k === sortK ? (sortDir > 0 ? ' <span class="arrow">▲</span>' : ' <span class="arrow">▼</span>') : ''));
+      const tb = document.getElementById('rows');
+      tb.innerHTML = rows.map(i => {
+        const p = prices[i.id];
+        return `<tr class="${sel.has(i.id) ? 'sel' : ''}">
+          <td><input type="checkbox" ${sel.has(i.id) ? 'checked' : ''} onchange="pick(${i.id},this.checked)"></td>
+          <td>${i.image ? `<img src="${esc(i.image)}" loading="lazy">` : '—'}</td>
+          <td class="title">${esc(i.title)} ${i.discontinued ? '<span class="disc">disc</span>' : ''}</td>
+          <td class="muted">${esc(i.brand || '—')}</td>
+          <td class="muted">${esc(i.type || '')}</td>
+          <td class="muted">${esc(cats[i.category] || '')}</td>
+          <td class="muted">${i.variants ?? ''}</td>
+          <td>${p ? '$' + p.min.toFixed(2) : '<span class="muted">…</span>'}</td>
+          <td class="muted">${p ? '$' + p.max.toFixed(2) : ''}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function pick(id, on) { on ? sel.add(id) : sel.delete(id); persist(); render(); }
+    function toggleAll(cb) { filtered().forEach(i => cb.checked ? sel.add(i.id) : sel.delete(i.id)); persist(); render(); }
+    function persist() { localStorage.setItem('mix_selection', JSON.stringify([...sel])); }
+    function saveSel() { persist(); alert(`Saved ${sel.size} items as the store selection.`); }
+    function clearSel() { if (confirm('Clear selection?')) { sel.clear(); persist(); render(); } }
+    function exportSel() {
+      const chosen = items.filter(i => sel.has(i.id)).map(i => ({ id: i.id, title: i.title, type: i.type, category: cats[i.category] || i.category, min: prices[i.id]?.min, max: prices[i.id]?.max }));
+      const b = new Blob([JSON.stringify(chosen, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'mix-store-selection.json'; a.click();
+    }
+
+    document.querySelectorAll('th[data-k]').forEach(th => th.onclick = () => {
+      if (sortK === th.dataset.k) sortDir *= -1; else { sortK = th.dataset.k; sortDir = 1; }
+      render();
+    });
+
+    load();
+  </script>
+</body>
+</html>
